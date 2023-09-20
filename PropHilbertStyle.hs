@@ -13,6 +13,9 @@ data Sequent = [Form] :=> [Form] deriving (Eq, Read, Show)
 neg :: Form -> Form
 neg f = f :-> Bot
 
+top :: Form
+top = Bot :-> Bot
+
 subst :: Form -> String -> Form -> Form
 subst Bot _ _ = Bot
 subst f0@(Var v) v' f = if v == v' then f else f0
@@ -87,12 +90,12 @@ infix 5 :|-
 data Deriv = [Form] :|- Form deriving Show
 
 dedLemImplElim :: Deriv -> Maybe [Deriv]
-dedLemImplElim (fms :|- a :-> b) = Just $ (:[]) $ (a : fms) :|- b
+dedLemImplElim (fms :|- a :-> b) = Just $ [(a : fms) :|- b]
 dedLemImplElim _ = Nothing
 
 dedLemImplIntro :: Form -> Deriv -> Maybe [Deriv]
 dedLemImplIntro h (fms :|- a)
-  | h `elem` fms = Just $ (:[]) $ (del_h fms) :|- h :-> a
+  | h `elem` fms = Just $ [(del_h fms) :|- h :-> a]
   | otherwise = Nothing
     where
       del_h :: [Form] -> [Form]
@@ -103,40 +106,62 @@ dedLemImplIntro h (fms :|- a)
 
 type Goal = Deriv
 
-data ProofState = ProofState { derived :: [Form]
-                             , goals :: [Goal]
+data ProofState = ProofState { currGoal :: Goal
+                             , derived :: [Form]
+                             , openGoals :: [([Form], Goal)]
                              } deriving (Show)
 
-proofStepAx :: Form -> ProofState -> Maybe ProofState
-proofStepAx fm ps@(ProofState{derived = fms})
+noMoreGoals :: ProofState
+noMoreGoals = ProofState{ currGoal = [] :|- top
+                        , derived = []
+                        , openGoals = []
+                        }
+
+derivStepAx :: Form -> ProofState -> Maybe ProofState
+derivStepAx fm ps@(ProofState{derived = fms})
   | hilbertAx fm = Just $ ps {derived = fms ++ [fm]}
   | otherwise = Nothing
 
-proofStepH :: Form -> ProofState -> Maybe ProofState
-proofStepH _ (ProofState _ []) = Nothing
-proofStepH h (ProofState der gls@((hs :|- _) : _))
-  | h `elem` hs = Just $ ProofState (der ++ [h]) gls
+derivStepH :: Form -> ProofState -> Maybe ProofState
+derivStepH h ps@ProofState{ derived = der , currGoal = hs :|- _ }
+  | h `elem` hs = Just $ ps { derived = (der ++ [h]) }
   | otherwise = Nothing
 
-proofStepMP :: Int -> Int -> ProofState -> Maybe ProofState
-proofStepMP i j ps@ProofState{ derived = der }
+derivStepMP :: Int -> Int -> ProofState -> Maybe ProofState
+derivStepMP i j ps@ProofState{ derived = der }
   | i >= length der || j >= length der = Nothing
   | otherwise = let (a, b) = (der !! i, der !! j) in
                   case apModusPonens a b of
                     Nothing -> Nothing
                     Just c -> Just $ ps {derived = der ++ [c]}
 
-proofFinGoal :: ProofState -> Maybe ProofState
-proofFinGoal ProofState{ goals = [] } = Nothing -- TODO : is this a correct approach?
-proofFinGoal (ProofState der ((_ :|- g):gs))
-  | last der == g = Just $ ProofState [] gs
+proofCloseGoal :: ProofState -> Maybe ProofState
+proofCloseGoal ps@ProofState{ derived = der , currGoal = _ :|- g }
+  | last der == g = case openGoals ps of
+                      [] -> Just noMoreGoals
+                      (der', g'):gs -> Just $ ProofState{ currGoal = g'
+                                                        , derived = der'
+                                                        , openGoals = gs
+                                                        }
   | otherwise = Nothing
 
 
-proofNewGoals :: (Goal -> Maybe [Goal]) -> ProofState -> Maybe ProofState
-proofNewGoals _ ProofState{ goals = [] } = Nothing
-proofNewGoals thm ProofState{ goals = g:gs } = case thm g of
-                                            Nothing -> Nothing
-                                            Just newGoals -> Just $ ProofState { derived = [] , goals = newGoals ++ gs }
+proofReplaceGoal :: (Goal -> Maybe [Goal]) -> ProofState -> Maybe ProofState
+proofReplaceGoal thm ps@ProofState{ currGoal = g , openGoals = gs } =
+  case thm g of
+    Nothing -> Nothing
+    Just [] -> proofCloseGoal ps -- theorem immediately achieves our goal
+    Just (newGoal:newGoals) -> Just $ ProofState{ currGoal = newGoal
+                                                , derived = []
+                                                , openGoals = newFreshGoals ++ gs
+                                                } where newFreshGoals = map ((,) []) newGoals -- new goals with empty derivations
 
--- TODO:  prettyPrint, prettyWrite?, basic IO
+proofAssertNewGoal :: Form -> ProofState -> Maybe ProofState
+proofAssertNewGoal fm ProofState{ currGoal = g@(hs :|- _) , derived = der , openGoals = gs } = Just ps
+  where
+    ps = ProofState{ currGoal = hs :|- fm
+                   , derived = []
+                   , openGoals = (der, g):gs
+                   }
+
+-- TODO: variations of proofAssertNewGoal, structural rules, prettyPrint, prettyWrite?, basic IO

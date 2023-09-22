@@ -1,4 +1,4 @@
-module HilbertStyle where
+module PropHilbertStyle where
 
 import Data.Function ((&))
 
@@ -93,16 +93,20 @@ dedLemImplElim :: Deriv -> Maybe [Deriv]
 dedLemImplElim (fms :|- a :-> b) = Just $ [(a : fms) :|- b]
 dedLemImplElim _ = Nothing
 
+delFirstOccur :: (Eq a) => [a] -> a -> [a]
+delFirstOccur xs x = xs' ++ tail xs'' where (xs', xs'') = break (==x) xs
+
 dedLemImplIntro :: Form -> Deriv -> Maybe [Deriv]
-dedLemImplIntro h (fms :|- a)
-  | h `elem` fms = Just $ [(del_h fms) :|- h :-> a]
+dedLemImplIntro h (hs :|- a)
+  | h `elem` hs = Just $ [delFirstOccur hs h :|- h :-> a]
   | otherwise = Nothing
-    where
-      del_h :: [Form] -> [Form]
-      del_h [] = [] -- does not needed but anyway
-      del_h (h' : fs)
-        | h' == h = fs
-        | otherwise = h' : (del_h fs)
+
+
+weakening :: Form -> Deriv -> Maybe [Deriv]
+weakening h (hs :|- a)
+  | h `elem` hs = Just [delFirstOccur hs h :|- a]
+  | otherwise = Nothing
+
 
 type Goal = Deriv
 
@@ -164,4 +168,6 @@ proofAssertNewGoal fm ProofState{ currGoal = g@(hs :|- _) , derived = der , open
                    , openGoals = (der, g):gs
                    }
 
--- TODO: variations of proofAssertNewGoal, structural rules, prettyPrint, prettyWrite?, basic IO
+
+
+-- TODO: variations of proofAssertNewGoal, prettyPrint, prettyWrite?, basic IO

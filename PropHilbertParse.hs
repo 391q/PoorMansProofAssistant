@@ -26,6 +26,7 @@ data FormToken = TPropVar String | TMetaVar String
                 | TBot | TTop
                 | TOpImpl | TOpConj | TOpDisj | TOpNeg
                 | TError
+                deriving (Eq, Show)
 
 
 tokenise :: String -> [FormToken]

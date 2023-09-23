@@ -2,6 +2,7 @@ module PropHilbertParse where
 
 import PropHilbertStyle
 import Data.Char (isLetter, isUpper, toLower)
+import Control.Monad.State
 
 prettyPrintForm :: Form -> String
 prettyPrintForm Bot = "⊥"
@@ -26,6 +27,7 @@ data FormToken = TPropVar String | TMetaVar String
                 | TBot | TTop
                 | TOpImpl | TOpConj | TOpDisj | TOpNeg
                 | TError
+                | TForm Form -- ugly solution for stack in parsing
                 deriving (Eq, Show)
 
 
@@ -57,5 +59,29 @@ tokenise fmStr = aux $ words $ padPars fmStr
       where
         wrdToLow = map toLower wrd
 
-readFm :: String -> Form
-readFm = undefined
+
+parse :: [FormToken] -> Maybe Form -- this version does not distinguish PropVars from MetaVars
+parse tokens
+  | TError `elem` tokens = Nothing
+  | otherwise = parseAux tokens [] -- evalState $ parsingPDA tokens
+  where
+    parseAux :: [FormToken] -> [FormToken] -> Maybe Form
+    parseAux [] [TForm fm] = Just fm
+    parseAux ts (TBot:stack) = parseAux ts (TForm Bot : stack)
+    parseAux ts (TTop:stack) = parseAux ts (TForm top : stack)
+    parseAux ts (TPropVar v : stack) = parseAux ts (TForm (Var v) : stack)
+    parseAux ts (TMetaVar v : stack) = parseAux ts (TForm (Var v) : stack) -- TODO : add contexts to use meta vars
+    parseAux ts (TForm fm : TOpNeg : stack) = parseAux ts (TForm (neg fm) : stack)
+    parseAux ts (TClosedBracket : f@(TForm _) : TOpenBracket : stack) = parseAux ts (f : stack)
+    parseAux ts (TForm psi : maybeOp : TForm phi : stack) =
+      case maybeOp of
+        TOpImpl -> parseAux ts (TForm (phi :-> psi) : stack)
+        TOpDisj -> parseAux ts (TForm (phi :\/ psi) : stack)
+        TOpConj -> parseAux ts (TForm (phi :/\ psi) : stack)
+        _ -> Nothing
+
+    parseAux [] _ = Nothing
+    parseAux (t:ts) stack = parseAux ts (t:stack)
+
+readFm :: String -> Maybe Form
+readFm str = parse . tokenise $ str
